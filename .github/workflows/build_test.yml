@@ -28,6 +28,6 @@ jobs:
         with:
           command: cves
           image: my-app:1.0.0
-          file: ./Dockerfile
+          file: ./api/Dockerfile
           only-severities: critical,high
           exit-code: true
