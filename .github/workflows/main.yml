@@ -88,8 +88,10 @@ jobs:
           for i in $(seq 1 $MAX_RETRIES); do
             echo "Attempt $i / $MAX_RETRIES — checking services health..."
 
-            # Health field is "" for services without a healthcheck (admin_mongo, admin_mysql)
-            STATUSES=$(docker compose ps --format json | jq -r '.[].Health')
+            # docker compose ps --format json outputs JSON Lines (one object per line) on
+            # GitHub-hosted runners, not a JSON array. The type-check handles both formats.
+            STATUSES=$(docker compose ps --format json \
+              | jq -r 'if type == "array" then .[].Health else .Health end')
 
             # Keep only entries from services that actually have a healthcheck
             MONITORED=$(echo "$STATUSES" | grep -v '^$' || true)
