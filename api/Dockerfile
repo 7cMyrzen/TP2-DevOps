@@ -1,19 +1,26 @@
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Create a non-root user
-RUN addgroup -S apiuser && adduser -S apiuser -G apiuser
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install curl for healthcheck and build dependencies for python packages
-RUN apk add --no-cache curl build-base libffi-dev
+# Create non-root user
+RUN groupadd -r apiuser && useradd -r -g apiuser apiuser
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+RUN pip install --no-cache-dir --upgrade pip wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
 RUN chown -R apiuser:apiuser /app
+
 USER apiuser
 
 EXPOSE 8000
