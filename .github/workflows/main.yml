@@ -1,0 +1,161 @@
+name: CI/CD Pipeline – FastAPI Hybrid Stack
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════
+  # JOB 1 — Build & Security Scan
+  # ═══════════════════════════════════════════════════════════════
+  build_and_scan:
+    name: "Job 1 – Build & Security Scan"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Login required for Docker Scout to work
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build API image
+        run: docker build -t api:ci -f ./api/Dockerfile ./api
+
+      # BLOCKING: pipeline fails if CRITICAL CVEs are found in our own image
+      - name: Docker Scout – Scan API image (fail on critical)
+        uses: docker/scout-action@v1
+        with:
+          command: cves
+          image: api:ci
+          only-severities: critical
+          exit-code: true
+
+      # NON-BLOCKING: we cannot fix an official image, so we only display the report
+      - name: Trivy – Scan MySQL image (informational only)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: mysql:8.0
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+
+
+  # ═══════════════════════════════════════════════════════════════
+  # JOB 2 — Integration Tests  (requires Job 1)
+  # ═══════════════════════════════════════════════════════════════
+  integration_tests:
+    name: "Job 2 – Integration Tests"
+    runs-on: ubuntu-latest
+    needs: build_and_scan
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Build .env on-the-fly — no secrets committed to the repository
+      - name: Generate .env from GitHub Secrets
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MONGO_INITDB_ROOT_PASSWORD: ${{ secrets.MONGO_INITDB_ROOT_PASSWORD }}
+        run: |
+          printf "MYSQL_ROOT_PASSWORD=%s\n"          "$MYSQL_ROOT_PASSWORD"          >> .env
+          printf "MYSQL_DATABASE=sqldb\n"                                             >> .env
+          printf "MYSQL_USER=sqluser\n"                                               >> .env
+          printf "MYSQL_PASSWORD=sqluserpwd\n"                                        >> .env
+          printf "MONGO_INITDB_ROOT_USERNAME=mongouser\n"                             >> .env
+          printf "MONGO_INITDB_ROOT_PASSWORD=%s\n"   "$MONGO_INITDB_ROOT_PASSWORD"   >> .env
+
+      - name: Deploy full stack
+        run: docker compose up -d --build
+
+      # Custom health-check: polls every 5 s, up to 12 attempts (60 s total)
+      - name: Wait for all services to be healthy
+        run: |
+          MAX_RETRIES=12
+          SLEEP_INTERVAL=5
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Attempt $i / $MAX_RETRIES — checking services health..."
+
+            # Health field is "" for services without a healthcheck (admin_mongo, admin_mysql)
+            STATUSES=$(docker compose ps --format json | jq -r '.[].Health')
+
+            # Keep only entries from services that actually have a healthcheck
+            MONITORED=$(echo "$STATUSES" | grep -v '^$' || true)
+
+            if [ -z "$MONITORED" ]; then
+              echo "  No health data yet, retrying in ${SLEEP_INTERVAL}s..."
+              sleep $SLEEP_INTERVAL
+              continue
+            fi
+
+            TOTAL=$(echo "$MONITORED" | wc -l | tr -d '[:space:]')
+            HEALTHY=$(echo "$MONITORED" | grep -c "^healthy$" || true)
+
+            echo "  $HEALTHY / $TOTAL services healthy"
+
+            if [ "$HEALTHY" -eq "$TOTAL" ] && [ "$TOTAL" -gt 0 ]; then
+              echo "All services are healthy — proceeding."
+              exit 0
+            fi
+
+            sleep $SLEEP_INTERVAL
+          done
+
+          echo "TIMEOUT: services did not become healthy within $((MAX_RETRIES * SLEEP_INTERVAL))s"
+          docker compose ps
+          docker compose logs --tail=100
+          exit 1
+
+      - name: Functional test – GET /posts returns HTTP 200
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/posts)
+          echo "/posts → HTTP $STATUS"
+          [ "$STATUS" -eq 200 ]
+
+      - name: Functional test – GET /users returns HTTP 200
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/users)
+          echo "/users → HTTP $STATUS"
+          [ "$STATUS" -eq 200 ]
+
+
+  # ═══════════════════════════════════════════════════════════════
+  # JOB 3 — Publish to Docker Hub  (requires Job 2)
+  # ═══════════════════════════════════════════════════════════════
+  publish:
+    name: "Job 3 – Publish to Docker Hub"
+    runs-on: ubuntu-latest
+    needs: integration_tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push API image (tag latest)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          file: ./api/Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/api:latest
