@@ -53,8 +53,32 @@ docker compose down -v && docker compose up -d
 *   **Adminer** : [http://localhost:8080](http://localhost:8080) (Serveur : `db_mysql`)
 *   **Mongo Express** : [http://localhost:8081](http://localhost:8081)
 
+## Pipeline CI/CD
+
+<img alt="GitHub Actions" src="https://img.shields.io/badge/github%20actions-%232671E5.svg?style=for-the-badge&logo=githubactions&logoColor=white"/>
+
+Le fichier `.github/workflows/main.yml` automatise entièrement le cycle de vie de l'application en trois jobs séquentiels :
+
+| Job | Rôle | Condition |
+|-----|------|-----------|
+| **Job 1 – Build & Security Scan** | Construit l'image API, la scanne avec Docker Scout (bloquant sur CRITICAL) et scanne l'image MySQL officielle avec Trivy (informatif) | push / PR sur `main` |
+| **Job 2 – Integration Tests** | Déploie la stack complète, attend que tous les services soient healthy, valide les routes `/posts` et `/users` | après Job 1 |
+| **Job 3 – Publish** | Publie l'image API sur Docker Hub avec le tag `latest` | après Job 2 |
+
+### Secrets GitHub requis
+
+Configurer dans **Settings → Secrets and variables → Actions** :
+
+| Secret | Description |
+|--------|-------------|
+| `DOCKERHUB_USERNAME` | Nom d'utilisateur Docker Hub |
+| `DOCKERHUB_TOKEN` | Access Token Docker Hub (pas le mot de passe) |
+| `MYSQL_ROOT_PASSWORD` | Mot de passe root MySQL |
+| `MONGO_INITDB_ROOT_PASSWORD` | Mot de passe root MongoDB |
+
 ## Structure du Projet
 *   `/api` : Code source, Dockerfile et configurations de l'API.
 *   `/mongo` : Dockerfile non-root et scripts d'initialisation NoSQL.
 *   `/sqlfiles` : Scripts SQL pour l'initialisation de la base de données pilotes.
 *   `docker-compose.yml` : Fichier principal d'orchestration.
+*   `.github/workflows/main.yml` : Pipeline CI/CD GitHub Actions.
