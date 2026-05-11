@@ -155,3 +155,11 @@ jobs:
           file: ./api/Dockerfile
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/api:latest
+
+      - name: Build and push MongoDB image (tag latest)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./mongo
+          file: ./mongo/Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/mongo:latest
