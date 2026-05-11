@@ -121,16 +121,10 @@ jobs:
           exit 1
 
       - name: Functional test – GET /posts returns HTTP 200
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/posts)
-          echo "/posts → HTTP $STATUS"
-          [ "$STATUS" -eq 200 ]
+        run: curl --fail --show-error http://localhost:8000/posts
 
       - name: Functional test – GET /users returns HTTP 200
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/users)
-          echo "/users → HTTP $STATUS"
-          [ "$STATUS" -eq 200 ]
+        run: curl --fail --show-error http://localhost:8000/users
 
 
   # ═══════════════════════════════════════════════════════════════
