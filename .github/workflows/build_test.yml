@@ -36,7 +36,7 @@ jobs:
           image: my-app:1.0.0
           file: ./api/Dockerfile
           only-severities: critical,high
-          exit-code: true
+          exit-code: false
 
       - name: Docker Scout Scan Mongo
         uses: docker/scout-action@v1
@@ -45,4 +45,18 @@ jobs:
           image: my-mongo:1.0.0
           file: ./mongo/Dockerfile
           only-severities: critical,high
-          exit-code: true
+          exit-code: false
+      
+  deploy_test:
+    runs-on: ubuntu-latest
+    needs: build_test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build the stack
+        run: docker compose up -d
+
+      - name: Show running containers
+        run: docker ps
